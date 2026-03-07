@@ -11,7 +11,6 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const cors = require('cors');
 app.use(cors({
   origin: 'https://zaharachurch.store', // Tu nuevo dominio exacto
   credentials: true
