@@ -99,3 +99,7 @@ app.delete('/api/productos/:id', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 Servidor Cloudinary listo en puerto ${PORT}`);
 });
+
+app.get('/ping', (req, res) => {
+  res.send('Servidor de Zahara activo');
+});
