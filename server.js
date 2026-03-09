@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const multer = require('multer');
+const fs = require('fs');
 
 // --- 1. IMPORTAMOS CLOUDINARY ---
 const cloudinary = require('cloudinary').v2;
@@ -35,9 +36,17 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage: storage });
 
-// BASE DE DATOS
+// --- BASE DE DATOS (BLINDADA) ---
+
+// 1. Revisamos si la carpeta existe. Si no, la creamos.
+if (!fs.existsSync('./database')) {
+    fs.mkdirSync('./database');
+    console.log("📁 Carpeta 'database' creada automáticamente.");
+}
+
+// 2. Conectamos la base de datos
 const db = new sqlite3.Database('./database/tienda.db', (err) => {
-    if (err) console.error(err.message);
+    if (err) console.error("Error de base de datos:", err.message);
     else {
         console.log("📦 Conectado a SQLite.");
         db.run(`CREATE TABLE IF NOT EXISTS productos (
@@ -48,7 +57,6 @@ const db = new sqlite3.Database('./database/tienda.db', (err) => {
         )`);
     }
 });
-
 // --- RUTAS ---
 
 // Login
