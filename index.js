@@ -1,24 +1,87 @@
+require('dotenv').config(); // Permite leer el archivo .env
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+const cors = require('cors');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const app = express();
-const prisma = new PrismaClient(); // Encendemos la conexión a la Base de Datos
-const puerto = 3000;
+const prisma = new PrismaClient();
+const puerto = process.env.PORT || 3000;
 
-// Permite que el servidor entienda JSON
+// --- 1. SEGURIDAD Y CONFIGURACIÓN ---
+app.use(cors({
+  origin: ['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
+  credentials: true
+}));
 app.use(express.json());
 
-// 1. Ruta para obtener el catálogo (Ahora viene de la nube)
+// --- 2. CONFIGURACIÓN DE CLOUDINARY ---
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'zahara_store',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+    },
+});
+const upload = multer({ storage: storage });
+
+// --- 3. RUTAS DE ADMINISTRACIÓN (LOGIN) ---
+app.post('/api/login', (req, res) => {
+    const { usuario, password } = req.body;
+    if (usuario === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
+        res.json({ exito: true });
+    } else {
+        res.status(401).json({ exito: false });
+    }
+});
+
+// --- 4. RUTAS DEL CATÁLOGO DE ROPA ---
+// Ver productos
 app.get('/api/productos', async (req, res) => {
     const productos = await prisma.producto.findMany();
     res.json(productos);
 });
 
-// 2. Ruta para recibir y GUARDAR un pago real
+// Crear producto (CON IMAGEN A CLOUDINARY)
+app.post('/api/admin/productos', upload.single('imagen'), async (req, res) => {
+    const { nombre, precio_usd, stock } = req.body;
+    
+    try {
+        let imagenUrl = null;
+        if (req.file) {
+            imagenUrl = req.file.path; // ¡La URL mágica de Cloudinary!
+        }
+
+        // Guardamos en la base de datos PostgreSQL
+        const nuevoProducto = await prisma.producto.create({
+            data: {
+                nombre: nombre,
+                precio_usd: parseFloat(precio_usd), // Convertimos a número
+                stock: stock ? parseInt(stock) : 0,
+                imagen: imagenUrl
+            }
+        });
+
+        console.log('¡Prenda guardada con foto en la nube!', nuevoProducto.nombre);
+        res.json({ mensaje: 'Prenda agregada al catálogo', producto: nuevoProducto });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al guardar en la base de datos' });
+    }
+});
+
+// --- 5. RUTAS DE PAGOS MÓVILES ---
+// Recibir pago
 app.post('/api/pagos', async (req, res) => {
     const reporte = req.body; 
-    
-    // Guardamos en la tabla "pago" de PostgreSQL
     const nuevoPago = await prisma.pago.create({
         data: {
             banco: reporte.banco,
@@ -26,44 +89,31 @@ app.post('/api/pagos', async (req, res) => {
             monto_bs: reporte.monto
         }
     });
-
-    console.log('¡Pago guardado en la nube!', nuevoPago);
-
-    res.json({
-        mensaje: 'Tu reporte de pago ha sido recibido y guardado.',
-        estado: nuevoPago.estado
-    });
+    console.log('¡Nuevo pago registrado!', nuevoPago.id);
+    res.json({ mensaje: 'Tu reporte de pago ha sido recibido.', estado: nuevoPago.estado });
 });
 
-// 3. Ruta GET para el Panel de Administración
+// Ver pagos (Admin)
 app.get('/api/admin/pagos', async (req, res) => {
-    // Buscamos todos los pagos en la base de datos
     const pagosRegistrados = await prisma.pago.findMany();
     res.json(pagosRegistrados);
 });
 
-// 4. Ruta PUT para aprobar un pago
+// Aprobar pago (Admin)
 app.put('/api/admin/pagos/:id', async (req, res) => {
     const idPago = parseInt(req.params.id);
-
     try {
-        // Buscamos y actualizamos directamente en la nube
         const pagoActualizado = await prisma.pago.update({
             where: { id: idPago },
             data: { estado: 'Aprobado' }
         });
-
-        res.json({
-            mensaje: `El pago #${idPago} ha sido aprobado exitosamente.`,
-            pagoActualizado: pagoActualizado
-        });
+        res.json({ mensaje: `Pago #${idPago} aprobado.`, pagoActualizado });
     } catch (error) {
-        // Si Prisma no encuentra el ID, lanza un error y caemos aquí
-        res.status(404).json({ error: 'Pago no encontrado en el sistema' });
+        res.status(404).json({ error: 'Pago no encontrado' });
     }
 });
 
 // Encender el servidor
 app.listen(puerto, () => {
-    console.log(`Servidor conectado a BD corriendo en http://localhost:${puerto}`);
+    console.log(`🚀 Servidor conectado a BD y Cloudinary en puerto ${puerto}`);
 });

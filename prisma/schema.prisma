@@ -13,6 +13,7 @@ model Producto {
   nombre      String
   precio_usd  Float
   stock       Int      @default(0)
+  imagen      String?  // Agregamos esto. El "?" significa que es opcional por si subes algo sin foto temporalmente
   fecha_crea  DateTime @default(now())
 }
 
