@@ -12,7 +12,7 @@ const puerto = process.env.PORT || 3000;
 
 // --- 1. SEGURIDAD Y CONFIGURACIÓN ---
 app.use(cors({
-  origin: ['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
+   origin: true, //['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
   credentials: true
 }));
 app.use(express.json());
@@ -110,6 +110,19 @@ app.put('/api/admin/pagos/:id', async (req, res) => {
         res.json({ mensaje: `Pago #${idPago} aprobado.`, pagoActualizado });
     } catch (error) {
         res.status(404).json({ error: 'Pago no encontrado' });
+    }
+});
+
+// Eliminar producto del catálogo
+app.delete('/api/admin/productos/:id', async (req, res) => {
+    const idProducto = parseInt(req.params.id);
+    try {
+        await prisma.producto.delete({
+            where: { id: idProducto }
+        });
+        res.json({ mensaje: "Producto eliminado exitosamente" });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al eliminar el producto' });
     }
 });
 
