@@ -1,84 +1,69 @@
 const express = require('express');
+const { PrismaClient } = require('@prisma/client');
+
 const app = express();
+const prisma = new PrismaClient(); // Encendemos la conexión a la Base de Datos
 const puerto = 3000;
-// Esto permite que el servidor entienda la información que le envían
+
+// Permite que el servidor entienda JSON
 app.use(express.json());
-// Simulamos una base de datos temporal en memoria
-const pagosRegistrados = [];
 
-// 1. Ruta principal (La que hicimos primero)
-app.get('/', (req, res) => {
-    res.send('¡Hola! El backend de Zahara está funcionando perfectamente.');
-});
-
-// 2. Ruta para obtener el catálogo de productos (La nueva)
-app.get('/api/productos', (req, res) => {
-    const productos = [
-        { id: 1, nombre: 'Franela Oversize Negra', precio_usd: 15.00 },
-        { id: 2, nombre: 'Pantalón Cargo', precio_usd: 25.50 },
-        { id: 3, nombre: 'Gorra Vintage', precio_usd: 10.00 }
-    ];
-    
-    // res.json convierte la lista en formato JSON y la envía al navegador
+// 1. Ruta para obtener el catálogo (Ahora viene de la nube)
+app.get('/api/productos', async (req, res) => {
+    const productos = await prisma.producto.findMany();
     res.json(productos);
 });
 
-// Ruta para recibir el reporte de un pago del cliente
-app.post('/api/pagos', (req, res) => {
+// 2. Ruta para recibir y GUARDAR un pago real
+app.post('/api/pagos', async (req, res) => {
     const reporte = req.body; 
     
-    // Le agregamos un ID y la fecha actual al reporte antes de guardarlo
-    const nuevoPago = {
-        id: pagosRegistrados.length + 1,
-        banco: reporte.banco,
-        referencia: reporte.referencia,
-        monto: reporte.monto,
-        fecha: new Date().toLocaleString(),
-        estado: 'Pendiente'
-    };
+    // Guardamos en la tabla "pago" de PostgreSQL
+    const nuevoPago = await prisma.pago.create({
+        data: {
+            banco: reporte.banco,
+            referencia: reporte.referencia,
+            monto_bs: reporte.monto
+        }
+    });
 
-    // Guardamos el pago en nuestra "base de datos"
-    pagosRegistrados.push(nuevoPago);
-
-    console.log('¡Nuevo pago guardado en el sistema!');
+    console.log('¡Pago guardado en la nube!', nuevoPago);
 
     res.json({
-        mensaje: 'Tu reporte de pago ha sido recibido.',
-        estado: 'Pendiente de verificación'
+        mensaje: 'Tu reporte de pago ha sido recibido y guardado.',
+        estado: nuevoPago.estado
     });
 });
 
-// Ruta GET para el Panel de Administración (Ver todos los pagos)
-app.get('/api/admin/pagos', (req, res) => {
-    // Aquí el servidor simplemente devuelve la lista completa de pagos guardados
+// 3. Ruta GET para el Panel de Administración
+app.get('/api/admin/pagos', async (req, res) => {
+    // Buscamos todos los pagos en la base de datos
+    const pagosRegistrados = await prisma.pago.findMany();
     res.json(pagosRegistrados);
 });
 
-// Ruta PUT para aprobar un pago (Exclusivo del Panel de Administración)
-// El ":id" en la URL nos permite saber exactamente qué pago queremos modificar
-app.put('/api/admin/pagos/:id', (req, res) => {
-    // 1. Capturamos el ID que el administrador puso en la URL
+// 4. Ruta PUT para aprobar un pago
+app.put('/api/admin/pagos/:id', async (req, res) => {
     const idPago = parseInt(req.params.id);
 
-    // 2. Buscamos ese pago específico en nuestra lista
-    const pagoEncontrado = pagosRegistrados.find(pago => pago.id === idPago);
+    try {
+        // Buscamos y actualizamos directamente en la nube
+        const pagoActualizado = await prisma.pago.update({
+            where: { id: idPago },
+            data: { estado: 'Aprobado' }
+        });
 
-    // 3. Si alguien pone un ID que no existe, lanzamos un error
-    if (!pagoEncontrado) {
-        return res.status(404).json({ error: 'Pago no encontrado en el sistema' });
+        res.json({
+            mensaje: `El pago #${idPago} ha sido aprobado exitosamente.`,
+            pagoActualizado: pagoActualizado
+        });
+    } catch (error) {
+        // Si Prisma no encuentra el ID, lanza un error y caemos aquí
+        res.status(404).json({ error: 'Pago no encontrado en el sistema' });
     }
-
-    // 4. Si lo encontramos, le cambiamos el estado a "Aprobado"
-    pagoEncontrado.estado = 'Aprobado';
-
-    // 5. Respondemos con éxito
-    res.json({
-        mensaje: `El pago #${idPago} ha sido aprobado exitosamente.`,
-        pagoActualizado: pagoEncontrado
-    });
 });
 
-// 3. Encender el servidor (Esto SIEMPRE debe ir al final)
+// Encender el servidor
 app.listen(puerto, () => {
-    console.log(`Servidor corriendo en http://localhost:${puerto}`);
+    console.log(`Servidor conectado a BD corriendo en http://localhost:${puerto}`);
 });
