@@ -12,7 +12,7 @@ const puerto = process.env.PORT || 3000;
 
 // --- 1. SEGURIDAD Y CONFIGURACIÓN ---
 app.use(cors({
-   origin: true, //['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
+   origin: ['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
   credentials: true
 }));
 app.use(express.json());
