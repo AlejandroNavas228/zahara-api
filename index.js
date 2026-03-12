@@ -1,23 +1,19 @@
-require('dotenv').config(); // Permite leer el archivo .env
+require('dotenv').config(); // Para leer tus variables de entorno (.env)
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const cors = require('cors');
+const { PrismaClient } = require('@prisma/client');
+
+// --- LIBRERÍAS PARA SUBIR FOTOS (Cloudinary) ---
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const app = express();
 const prisma = new PrismaClient();
-const puerto = process.env.PORT || 3000;
 
-// --- 1. SEGURIDAD Y CONFIGURACIÓN ---
-app.use(cors({
-   origin: ['https://zaharachurch.store', 'http://localhost:5173', 'http://localhost:3000'], // Agregué localhost por si estás haciendo pruebas locales
-  credentials: true
-}));
-app.use(express.json());
-
-// --- 2. CONFIGURACIÓN DE CLOUDINARY ---
+// ==========================================
+// ☁️ CONFIGURACIÓN DE CLOUDINARY
+// ==========================================
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -27,106 +23,162 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
-        folder: 'zahara_store',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
-    },
+        folder: 'zahara_store', // La carpeta en tu Cloudinary
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
+    }
 });
+
+// ¡LA MAGIA! Configuramos multer para que acepte archivos
 const upload = multer({ storage: storage });
 
-// --- 3. RUTAS DE ADMINISTRACIÓN (LOGIN) ---
+
+// --- MIDDLEWARES ---
+app.use(cors()); 
+app.use(express.json()); 
+
+
+// ==========================================
+// 🔐 SEGURIDAD Y LOGIN (Versión Segura con .env)
+// ==========================================
 app.post('/api/login', (req, res) => {
     const { usuario, password } = req.body;
-    if (usuario === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
-        res.json({ exito: true });
+    
+    // Traemos las credenciales verdaderas desde el archivo oculto .env
+    const usuarioCorrecto = process.env.ADMIN_USER;
+    const claveCorrecta = process.env.ADMIN_PASS;
+    
+    // Comparamos lo que escribió tu hermana con lo que está en el .env
+    if (usuario === usuarioCorrecto && password === claveCorrecta) { 
+        res.json({ exito: true, mensaje: "Bienvenida jefa" });
     } else {
-        res.status(401).json({ exito: false });
+        res.json({ exito: false, error: "Credenciales inválidas" });
     }
 });
 
-// --- 4. RUTAS DEL CATÁLOGO DE ROPA ---
-// Ver productos
+// ==========================================
+// 👕 RUTAS DEL CATÁLOGO DE PRODUCTOS
+// ==========================================
+
+// 1. Obtener todos los productos
 app.get('/api/productos', async (req, res) => {
-    const productos = await prisma.producto.findMany();
-    res.json(productos);
+    try {
+        const productos = await prisma.producto.findMany();
+        res.json(productos);
+    } catch (error) {
+        console.error("Error al obtener productos:", error);
+        res.status(500).json({ error: "Error al obtener productos" });
+    }
 });
 
-// Crear producto (CON IMAGEN A CLOUDINARY)
-app.post('/api/admin/productos', upload.single('imagen'), async (req, res) => {
-    const { nombre, precio_usd, stock } = req.body;
+// 2. Crear un producto (AHORA RECIBE HASTA 5 FOTOS A LA VEZ)
+// Fíjate que usamos upload.array('imagenes', 5) en lugar de upload.single
+app.post('/api/admin/productos', upload.array('imagenes', 5), async (req, res) => {
+    const { nombre, precio_usd, stock } = req.body; 
+    
+    // req.files contiene todas las fotos que se subieron a Cloudinary
+    // Extraemos solo los links (URLs) de esas fotos para guardarlos en la base de datos
+    const linksImagenes = req.files ? req.files.map(file => file.path) : [];
     
     try {
-        let imagenUrl = null;
-        if (req.file) {
-            imagenUrl = req.file.path; // ¡La URL mágica de Cloudinary!
-        }
-
-        // Guardamos en la base de datos PostgreSQL
         const nuevoProducto = await prisma.producto.create({
             data: {
-                nombre: nombre,
-                precio_usd: parseFloat(precio_usd), // Convertimos a número
-                stock: stock ? parseInt(stock) : 0,
-                imagen: imagenUrl
+                nombre,
+                precio_usd: parseFloat(precio_usd),
+                imagenes: linksImagenes, // Guardamos la lista completa de links
+                stock: parseInt(stock) || 0
             }
         });
-
-        console.log('¡Prenda guardada con foto en la nube!', nuevoProducto.nombre);
-        res.json({ mensaje: 'Prenda agregada al catálogo', producto: nuevoProducto });
+        res.json({ mensaje: "Producto creado con éxito", producto: nuevoProducto });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al guardar en la base de datos' });
+        console.error("Error al crear producto:", error);
+        res.status(500).json({ error: "Error al crear producto en la base de datos" });
     }
 });
 
-// --- 5. RUTAS DE PAGOS MÓVILES ---
-// Recibir pago
-app.post('/api/pagos', async (req, res) => {
-    const reporte = req.body; 
-    const nuevoPago = await prisma.pago.create({
-        data: {
-            banco: reporte.banco,
-            referencia: reporte.referencia,
-            monto_bs: reporte.monto
-        }
-    });
-    console.log('¡Nuevo pago registrado!', nuevoPago.id);
-    res.json({ mensaje: 'Tu reporte de pago ha sido recibido.', estado: nuevoPago.estado });
-});
-
-// Ver pagos (Admin)
-app.get('/api/admin/pagos', async (req, res) => {
-    const pagosRegistrados = await prisma.pago.findMany();
-    res.json(pagosRegistrados);
-});
-
-// Aprobar pago (Admin)
-app.put('/api/admin/pagos/:id', async (req, res) => {
-    const idPago = parseInt(req.params.id);
-    try {
-        const pagoActualizado = await prisma.pago.update({
-            where: { id: idPago },
-            data: { estado: 'Aprobado' }
-        });
-        res.json({ mensaje: `Pago #${idPago} aprobado.`, pagoActualizado });
-    } catch (error) {
-        res.status(404).json({ error: 'Pago no encontrado' });
-    }
-});
-
-// Eliminar producto del catálogo
+// 3. Eliminar un producto 
 app.delete('/api/admin/productos/:id', async (req, res) => {
-    const idProducto = parseInt(req.params.id);
     try {
         await prisma.producto.delete({
-            where: { id: idProducto }
+            where: { id: parseInt(req.params.id) }
         });
-        res.json({ mensaje: "Producto eliminado exitosamente" });
+        res.json({ mensaje: "Producto eliminado correctamente" });
     } catch (error) {
-        res.status(500).json({ error: 'Error al eliminar el producto' });
+        console.error("Error al eliminar producto:", error);
+        res.status(500).json({ error: "Error al eliminar producto" });
     }
 });
 
-// Encender el servidor
-app.listen(puerto, () => {
-    console.log(`🚀 Servidor conectado a BD y Cloudinary en puerto ${puerto}`);
+
+// ==========================================
+// 📦 RUTAS DE ÓRDENES E INVENTARIO
+// ==========================================
+
+app.post('/api/ordenes', async (req, res) => {
+    const { clienteNombre, clienteTelefono, metodoPago, referencia, totalPagado, detalleCarrito } = req.body;
+    try {
+        const nuevaOrden = await prisma.orden.create({
+            data: {
+                clienteNombre, clienteTelefono, metodoPago, referencia,
+                totalPagado: parseFloat(totalPagado),
+                detalleCarrito: detalleCarrito, 
+                estado: "Pendiente" 
+            }
+        });
+        res.json(nuevaOrden);
+    } catch (error) {
+        console.error("Error al registrar la orden:", error);
+        res.status(500).json({ error: "Error al procesar la orden en la base de datos" });
+    }
+});
+
+app.get('/api/ordenes', async (req, res) => {
+    try {
+        const ordenes = await prisma.orden.findMany({
+            orderBy: { fechaCreacion: 'desc' }
+        });
+        res.json(ordenes);
+    } catch (error) {
+        console.error("Error al cargar órdenes:", error);
+        res.status(500).json({ error: "Error al cargar las órdenes" });
+    }
+});
+
+app.put('/api/ordenes/:id/aprobar', async (req, res) => {
+    const ordenId = parseInt(req.params.id);
+    try {
+        const orden = await prisma.orden.findUnique({ where: { id: ordenId } });
+        if (!orden || orden.estado !== "Pendiente") return res.status(400).json({ error: "La orden no existe o ya fue procesada." });
+
+        const operaciones = [];
+        const carrito = typeof orden.detalleCarrito === 'string' ? JSON.parse(orden.detalleCarrito) : orden.detalleCarrito;
+        
+        for (const item of carrito) {
+            operaciones.push(
+                prisma.producto.update({
+                    where: { id: item.id },
+                    data: { stock: { decrement: 1 } }
+                })
+            );
+        }
+
+        operaciones.push(
+            prisma.orden.update({
+                where: { id: ordenId },
+                data: { estado: "Aprobada" }
+            })
+        );
+
+        await prisma.$transaction(operaciones);
+        res.json({ mensaje: "¡Orden aprobada y stock descontado con éxito!" });
+
+    } catch (error) {
+        console.error("Error al aprobar orden:", error);
+        res.status(500).json({ error: "Hubo un problema al descontar el inventario." });
+    }
+});
+
+// --- ENCENDER EL SERVIDOR ---
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor de Zahara Store corriendo a toda máquina en el puerto ${PORT}`);
 });

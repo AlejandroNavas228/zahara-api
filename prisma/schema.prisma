@@ -7,22 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Tabla para el catálogo de ropa
 model Producto {
   id          Int      @id @default(autoincrement())
   nombre      String
   precio_usd  Float
+  
+  // ¡LA MAGIA DE LA GALERÍA! 
+  // Cambiamos "imagen String" por "imagenes String[]" (Los corchetes significan que ahora acepta un arreglo/lista de varios links)
+  imagenes    String[] 
+  
   stock       Int      @default(0)
-  imagen      String?  // Agregamos esto. El "?" significa que es opcional por si subes algo sin foto temporalmente
-  fecha_crea  DateTime @default(now())
 }
 
-// Tabla para los reportes de transferencia y pago móvil
-model Pago {
-  id          Int      @id @default(autoincrement())
-  banco       String   
-  referencia  String
-  monto_bs    Float
-  estado      String   @default("Pendiente")
-  fecha_pago  DateTime @default(now())
+// ¡NUEVA TABLA PARA EL PANEL DE ADMINISTRACIÓN!
+model Orden {
+  id               Int      @id @default(autoincrement())
+  clienteNombre    String
+  clienteTelefono  String
+  metodoPago       String
+  referencia       String
+  totalPagado      Float
+  
+  // El estado inicial siempre será Pendiente hasta que tu hermana revise su cuenta
+  estado           String   @default("Pendiente") // Podrá cambiar a "Aprobada" o "Rechazada"
+  
+  // Guardamos todo el carrito en formato JSON para saber exactamente qué camisas descontar del stock
+  detalleCarrito   Json     
+  
+  fechaCreacion    DateTime @default(now())
 }
