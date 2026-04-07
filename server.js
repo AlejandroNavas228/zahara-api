@@ -30,7 +30,7 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'zahara_store',
-        format: 'webp', // Fuerza la conversión a WebP
+        format: 'webp',
         transformation: [{ width: 1000, crop: "limit", quality: "auto" }],
     },
 });
@@ -49,7 +49,6 @@ const db = new sqlite3.Database('./database/tienda.db', (err) => {
     } else {
         console.log("📦 Conectado a SQLite.");
         
-        // Creamos la tabla con TODAS las columnas por si se crea desde cero
         db.run(`CREATE TABLE IF NOT EXISTS productos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT NOT NULL,
@@ -59,28 +58,30 @@ const db = new sqlite3.Database('./database/tienda.db', (err) => {
             stock INTEGER DEFAULT 0
         )`);
 
-        // Si la tabla ya existía, intentamos agregar las columnas nuevas.
-        // El "() => {}" atrapa el error de columna duplicada y evita que el servidor colapse.
         db.run("ALTER TABLE productos ADD COLUMN descripcion TEXT", () => {});
         db.run("ALTER TABLE productos ADD COLUMN stock INTEGER DEFAULT 0", () => {});
         
-        // Nos aseguramos de que exista la tabla de órdenes
+        // 🌟 TABLA DE ÓRDENES ACTUALIZADA PARA GUARDAR ROPA Y TELÉFONO
         db.run(`CREATE TABLE IF NOT EXISTS ordenes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente TEXT,
-            total REAL
+            telefono TEXT,
+            total REAL,
+            detalleCarrito TEXT
         )`);
+
+        // Si la tabla vieja ya existía, le agregamos las columnas nuevas sin romper nada
+        db.run("ALTER TABLE ordenes ADD COLUMN telefono TEXT", () => {});
+        db.run("ALTER TABLE ordenes ADD COLUMN detalleCarrito TEXT", () => {});
     }
 });
 
 // --- 5. RUTAS DE LA API ---
 
-// [Ruta de Prueba]
 app.get('/ping', (req, res) => {
   res.send('Servidor de Zahara activo');
 });
 
-// [Login de Administrador]
 app.post('/api/login', (req, res) => {
     const { usuario, password } = req.body;
     if (usuario === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
@@ -90,7 +91,6 @@ app.post('/api/login', (req, res) => {
     }
 });
 
-// [Obtener todos los Productos]
 app.get('/api/productos', (req, res) => {
     db.all("SELECT * FROM productos", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -98,10 +98,7 @@ app.get('/api/productos', (req, res) => {
     });
 });
 
-// [Crear un Producto Nuevo]
 app.post('/api/productos', (req, res) => {
-    
-    // Envolvemos la subida para atrapar errores de Cloudinary
     upload.single('imagen')(req, res, function (err) {
         if (err) {
             console.error("❌ Error de Cloudinary/Multer:", err);
@@ -122,14 +119,11 @@ app.post('/api/productos', (req, res) => {
                 console.error("❌ Error de Base de Datos:", err.message);
                 return res.status(500).json({ error: "Error en la base de datos: " + err.message });
             }
-            
-            console.log(`✅ Producto '${nombre}' guardado con éxito!`);
             res.json({ mensaje: "Producto creado con éxito", id: this.lastID });
         });
     });
 });
 
-// [Eliminar un Producto]
 app.delete('/api/productos/:id', (req, res) => {
     const id = req.params.id;
     db.run("DELETE FROM productos WHERE id = ?", id, function(err) {
@@ -138,7 +132,17 @@ app.delete('/api/productos/:id', (req, res) => {
     });
 });
 
-// [Obtener todas las Órdenes]
+// 🌟 ESTA ES LA RUTA NUEVA QUE FALTABA PARA RECIBIR LOS PEDIDOS
+app.post('/api/ordenes', (req, res) => {
+    const { cliente, telefono, total, detalleCarrito } = req.body;
+    
+    const sql = `INSERT INTO ordenes (cliente, telefono, total, detalleCarrito) VALUES (?, ?, ?, ?)`;
+    db.run(sql, [cliente, telefono, total, detalleCarrito], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ mensaje: "Orden registrada con éxito", id: this.lastID });
+    });
+});
+
 app.get('/api/ordenes', (req, res) => {
     db.all("SELECT * FROM ordenes ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -146,7 +150,6 @@ app.get('/api/ordenes', (req, res) => {
     });
 });
 
-// [Eliminar una Orden]
 app.delete('/api/ordenes/:id', (req, res) => {
     const { id } = req.params;
     db.run("DELETE FROM ordenes WHERE id = ?", id, function(err) {
