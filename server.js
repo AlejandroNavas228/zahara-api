@@ -132,15 +132,99 @@ app.delete('/api/productos/:id', (req, res) => {
     });
 });
 
-// 🌟 ESTA ES LA RUTA NUEVA QUE FALTABA PARA RECIBIR LOS PEDIDOS
-app.post('/api/ordenes', (req, res) => {
+/// 🌟 RUTA ACTUALIZADA: Guarda el pedido y genera el link con Lumina Pay
+app.post('/api/ordenes', async (req, res) => {
     const { cliente, telefono, total, detalleCarrito } = req.body;
     
+    // 1. Guardamos la orden en SQLite (Zahara)
     const sql = `INSERT INTO ordenes (cliente, telefono, total, detalleCarrito) VALUES (?, ?, ?, ?)`;
-    db.run(sql, [cliente, telefono, total, detalleCarrito], function(err) {
+    
+    db.run(sql, [cliente, telefono, total, detalleCarrito], async function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ mensaje: "Orden registrada con éxito", id: this.lastID });
+        
+        const ordenId = this.lastID; // El ID que se acaba de crear en Zahara
+
+        try {
+            // 2. LE PEDIMOS EL LINK A LUMINA PAY
+            const URL_LUMINA = process.env.LUMINA_URL || 'https://www.luminapay.xyz/';
+            
+            const luminaRes = await fetch(`${URL_LUMINA}/api/checkout`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': process.env.LUMINA_API_KEY 
+                },
+                body: JSON.stringify({
+                    monto: parseFloat(total),
+                    moneda: 'USD',
+                    descripcion: `Pedido en Zahara Store - Cliente: ${cliente}`,
+                    referenciaComercio: `ZAHARA-ORD-${ordenId}`,
+                    urlExito: 'https://zaharachurch.store' 
+                })
+            });
+
+            const luminaData = await luminaRes.json();
+
+            if (luminaRes.ok) {
+
+                res.json({ 
+                    mensaje: "Orden registrada", 
+                    id: ordenId, 
+                    url_pago: luminaData.url_pago 
+                });
+            } else {
+                // Si Lumina falla, igual le avisamos al frontend (para que use WhatsApp de respaldo)
+                console.error("Error de Lumina:", luminaData);
+                res.status(400).json({ error: "No se pudo generar el link de pago", id: ordenId });
+            }
+
+        } catch (error) {
+            console.error("Error conectando con Lumina:", error);
+            res.status(500).json({ error: "Error de red hacia la pasarela", id: ordenId });
+        }
     });
+});
+
+
+// ==========================================
+// RUTA WEBHOOK: RECIBE AVISOS DE LUMINA PAY
+// ==========================================
+app.post('/api/webhook/lumina', async (req, res) => {
+    try {
+        const { evento, data } = req.body;
+
+        if (evento === 'pago_exitoso') {
+            const idTransaccionLumina = data.id;
+            const montoPagado = data.monto;
+            
+            console.log(`🚨 WEBHOOK RECIBIDO: Pago exitoso de $${montoPagado} (Lumina ID: ${idTransaccionLumina})`);
+
+            // 👇 CÓDIGO DE NOTIFICACIÓN POR WHATSAPP 👇
+            const telefonoHermana = "+584143894452";
+            const apikeyCallMeBot = "6098733"; 
+        
+            const mensaje = `🚨 *¡NUEVA VENTA EN ZAHARA!* 🚨%0A%0ASe ha confirmado un pago por *$${montoPagado}*.%0A%0A¡Entra al panel de administrador para revisar la orden!`;
+
+            // Construimos la URL mágica que dispara el mensaje
+            const urlWhatsapp = `https://api.callmebot.com/whatsapp.php?phone=${telefonoHermana}&text=${mensaje}&apikey=${apikeyCallMeBot}`;
+            
+            try {
+                // Llamamos a la API del bot en silencio
+                await fetch(urlWhatsapp);
+                console.log("✅ Mensaje de WhatsApp enviado con éxito a la administradora.");
+            } catch (error) {
+                console.error("❌ Error al enviar el WhatsApp:", error);
+            }
+            // 👆 FIN DEL CÓDIGO DE NOTIFICACIÓN 👆
+
+            res.status(200).json({ mensaje: 'Webhook y notificación procesados' });
+        } else {
+            res.status(200).json({ mensaje: 'Evento ignorado' });
+        }
+    } catch (error) {
+        console.error('Error procesando el Webhook en Zahara:', error);
+        res.status(500).json({ error: 'Error interno en el servidor de Zahara' });
+    }
 });
 
 app.get('/api/ordenes', (req, res) => {
