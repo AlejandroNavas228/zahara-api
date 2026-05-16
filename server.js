@@ -145,23 +145,49 @@ app.post('/api/ordenes', async (req, res) => {
         const ordenId = this.lastID; // El ID que se acaba de crear en Zahara
 
         try {
-            // 2. LE PEDIMOS EL LINK A LUMINA PAY
-            const URL_LUMINA = process.env.LUMINA_URL || 'https://www.luminapay.xyz/';
-            
-            const luminaRes = await fetch(`${URL_LUMINA}/api/checkout`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': process.env.LUMINA_API_KEY 
-                },
-                body: JSON.stringify({
-                    monto: parseFloat(total),
-                    moneda: 'USD',
-                    descripcion: `Pedido en Zahara Store - Cliente: ${cliente}`,
-                    referenciaComercio: `ZAHARA-ORD-${ordenId}`,
-                    urlExito: 'https://zaharachurch.store' 
-                })
-            });
+            // ==========================================
+        // 2. EL BACKEND PIDE EL LINK A LUMINA PAY
+        // ==========================================
+        
+        // 🚨 IMPORTANTE: Reemplaza esto con la URL de tu BACKEND de Lumina en Render
+        // No pongas luminapay.xyz (ese es el frontend), pon el de la API.
+        const URL_LUMINA = process.env.LUMINA_URL || 'https://lumina-backend-3pu1.onrender.com/api/checkout'; 
+        
+        const luminaRes = await fetch(URL_LUMINA, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                // Tu API KEY de Lumina Business
+                'x-api-key': process.env.LUMINA_API_KEY || "zp_live_vqtcs94izri" 
+            },
+            body: JSON.stringify({
+                monto: total,
+                moneda: 'USD',
+                descripcion: `Pedido en Zahara Store`,
+                referenciaComercio: `ZAHARA-ORD-${ordenId}`,
+                urlExito: 'https://zaharachurch.store/gracias.html' 
+            })
+        });
+
+        // 🛡️ ESCUDO ANTI-CRASH: Leemos la respuesta como texto primero
+        const textResponse = await luminaRes.text();
+        let luminaData;
+        
+        try {
+            // Intentamos convertir el texto a JSON. Si está vacío, creamos un objeto vacío.
+            luminaData = textResponse ? JSON.parse(textResponse) : {};
+        } catch (e) {
+            console.error("Lumina no devolvió un JSON válido. Respuesta cruda:", textResponse);
+            return res.status(500).json({ error: "Fallo de comunicación con la pasarela." });
+        }
+
+        // 3. Verificamos si Lumina nos dio el link correctamente
+        if (luminaRes.ok && luminaData.url_pago) {
+            res.json({ mensaje: "Orden registrada", url_pago: luminaData.url_pago });
+        } else {
+            console.error("Lumina rechazó la petición:", luminaData);
+            res.status(400).json({ error: luminaData.error || "Lumina denegó el pago" });
+        }
 
             const luminaData = await luminaRes.json();
 
